@@ -2,6 +2,9 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from pygam import GAM
+import seaborn as sns
+import statsmodels.api as sm
+from statsmodels.graphics.gofplots import ProbPlot
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
@@ -64,6 +67,79 @@ def pca_biplot(score, coeff, labels=None):
     plt.xlabel("PC{}".format(1))
     plt.ylabel("PC{}".format(2))
     plt.grid()
+    plt.show()
+
+
+def graph(formula, x_range, label=None):
+    x = x_range
+    y = formula(x)
+    plt.plot(x, y, label=label, lw=1, ls='--', color='red')
+
+
+def diagnostic_plots(x, y, model_fit=None):
+    if not model_fit:
+        model_fit = sm.OLS(y, sm.add_constant(x)).fit()
+
+    dataframe = pd.concat([x, y], axis=1)
+    model_fitted_y = model_fit.fittedvalues
+    model_residuals = model_fit.resid
+    model_norm_residuals = model_fit.get_influence().resid_studentized_internal
+    model_norm_residuals_abs_sqrt = np.sqrt(np.abs(model_norm_residuals))
+    model_abs_resid = np.abs(model_residuals)
+    model_leverage = model_fit.get_influence().hat_matrix_diag
+    model_cooks = model_fit.get_influence().cooks_distance[0]
+
+    plot_lm_1 = plt.figure()
+    plot_lm_1.axes[0] = sns.residplot(model_fitted_y, dataframe.columns[-1], data=dataframe, lowess=True,
+                                      scatter_kws={'alpha': 0.5}, line_kws={'color': 'red', 'lw': 1, 'alpha': 0.8})
+
+    plot_lm_1.axes[0].set_title('Residuals vs Fitted')
+    plot_lm_1.axes[0].set_xlabel('Fitted values')
+    plot_lm_1.axes[0].set_ylabel('Residuals')
+    abs_resid = model_abs_resid.sort_values(ascending=False)
+    abs_resid_top_3 = abs_resid[:3]
+    for i in abs_resid_top_3.index:
+        plot_lm_1.axes[0].annotate(i, xy=(model_fitted_y[i], model_residuals[i]))
+
+    QQ = ProbPlot(model_norm_residuals)
+    plot_lm_2 = QQ.qqplot(line='45', alpha=0.5, color='#4C72B0', lw=1)
+    plot_lm_2.axes[0].set_title('Normal Q-Q')
+    plot_lm_2.axes[0].set_xlabel('Theoretical Quantiles')
+    plot_lm_2.axes[0].set_ylabel('Standardized Residuals')
+    abs_norm_resid = np.flip(np.argsort(np.abs(model_norm_residuals)), 0)
+    abs_norm_resid_top_3 = abs_norm_resid[:3]
+    for r, i in enumerate(abs_norm_resid_top_3):
+        plot_lm_2.axes[0].annotate(i, xy=(np.flip(QQ.theoretical_quantiles, 0)[r], model_norm_residuals[i]))
+
+    plot_lm_3 = plt.figure()
+    plt.scatter(model_fitted_y, model_norm_residuals_abs_sqrt, alpha=0.5)
+    sns.regplot(model_fitted_y, model_norm_residuals_abs_sqrt, scatter=False, ci=False, lowess=True,
+                line_kws={'color': 'red', 'lw': 1, 'alpha': 0.8})
+    plot_lm_3.axes[0].set_title('Scale-Location')
+    plot_lm_3.axes[0].set_xlabel('Fitted values')
+    plot_lm_3.axes[0].set_ylabel('$\sqrt{|Standardized Residuals|}$')
+
+    for i in abs_norm_resid_top_3:
+        plot_lm_3.axes[0].annotate(i, xy=(model_fitted_y[i], model_norm_residuals_abs_sqrt[i]))
+
+    plot_lm_4 = plt.figure()
+    plt.scatter(model_leverage, model_norm_residuals, alpha=0.5)
+    sns.regplot(model_leverage, model_norm_residuals, scatter=False, ci=False, lowess=True,
+                line_kws={'color': 'red', 'lw': 1, 'alpha': 0.8})
+    plot_lm_4.axes[0].set_xlim(0, max(model_leverage) + 0.01)
+    plot_lm_4.axes[0].set_ylim(-3, 5)
+    plot_lm_4.axes[0].set_title('Residuals vs Leverage')
+    plot_lm_4.axes[0].set_xlabel('Leverage')
+    plot_lm_4.axes[0].set_ylabel('Standardized Residuals')
+
+    leverage_top_3 = np.flip(np.argsort(model_cooks), 0)[:3]
+    for i in leverage_top_3:
+        plot_lm_4.axes[0].annotate(i, xy=(model_leverage[i], model_norm_residuals[i]))
+
+    p = len(model_fit.params)  # number of model parameters
+    graph(lambda a: np.sqrt((0.5 * p * (1 - a)) / a), np.linspace(0.001, max(model_leverage), 50), 'Cook\'s distance')
+    graph(lambda a: np.sqrt((1 * p * (1 - a)) / a), np.linspace(0.001, max(model_leverage), 50))
+    plot_lm_4.legend(loc='upper right')
     plt.show()
 
 
@@ -219,6 +295,9 @@ x_all_pca = pca_model.transform(x_scaled)
 
 # PCA biplot
 pca_biplot(x_all_pca[:, 0:2], np.transpose(pca_model.components_[0:2, :]), labels=features)
+
+# diagnostic plots
+diagnostic_plots(dataset.iloc[:, :-1], dataset.iloc[:, -1])
 
 # feature ranking
 feature_ranked, indices_ranked, ranked_model = rf_feature_ranking(x_all, y_all, features)
